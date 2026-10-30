@@ -545,6 +545,10 @@ impl Palette {
             "rose-pine" => Some(Self::rose_pine()),
             "rose-pine-dawn" => Some(Self::rose_pine_dawn()),
             "vesper" => Some(Self::vesper()),
+            // AgentNav palettes
+            "cs16" => Some(Self::cs16()),
+            "matrix" => Some(Self::matrix()),
+            "procomm" => Some(Self::procomm()),
             _ => None,
         }
     }

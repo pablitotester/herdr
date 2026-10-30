@@ -20,6 +20,10 @@ pub const THEME_NAMES: &[&str] = &[
     "rose-pine",
     "rose-pine-dawn",
     "vesper",
+    // AgentNav palettes (see app/palette_agentnav.rs)
+    "cs16",
+    "matrix",
+    "procomm",
 ];
 
 pub(crate) fn canonical_theme_name(name: &str) -> Option<&'static str> {
@@ -42,6 +46,10 @@ pub(crate) fn canonical_theme_name(name: &str) -> Option<&'static str> {
         "rose-pine" | "rosepine" => Some("rose-pine"),
         "rose-pine-dawn" | "rosepine-dawn" | "dawn" => Some("rose-pine-dawn"),
         "vesper" => Some("vesper"),
+        // AgentNav palettes
+        "cs16" | "cs" | "counter-strike" | "goldsrc" => Some("cs16"),
+        "matrix" => Some("matrix"),
+        "procomm" | "procomm-plus" => Some("procomm"),
         _ => None,
     }
 }
