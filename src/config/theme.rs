@@ -24,6 +24,8 @@ pub const THEME_NAMES: &[&str] = &[
     "cs16",
     "matrix",
     "procomm",
+    "ambar",
+    "miami",
 ];
 
 pub(crate) fn canonical_theme_name(name: &str) -> Option<&'static str> {
@@ -50,6 +52,8 @@ pub(crate) fn canonical_theme_name(name: &str) -> Option<&'static str> {
         "cs16" | "cs" | "counter-strike" | "goldsrc" => Some("cs16"),
         "matrix" => Some("matrix"),
         "procomm" | "procomm-plus" => Some("procomm"),
+        "ambar" | "amber" => Some("ambar"),
+        "miami" | "vice-city" | "vicecity" => Some("miami"),
         _ => None,
     }
 }

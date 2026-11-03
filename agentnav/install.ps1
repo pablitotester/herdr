@@ -1,5 +1,5 @@
 <#
-AgentNav: instala Herdr con los temas de AgentNav (cs16, matrix, procomm) en una PC con Windows, desde cero o sobre un
+AgentNav: instala Herdr con los temas de AgentNav (cs16, matrix, procomm, ambar, miami) en una PC con Windows, desde cero o sobre un
 Herdr oficial ya instalado. Una línea, en PowerShell:
 
     irm https://raw.githubusercontent.com/pablitotester/herdr/agentnav/agentnav/install.ps1 | iex
@@ -10,12 +10,21 @@ Qué hace:
     arma %USERPROFILE%\.herdr, el junction `current`, el PATH, conpty... igual que una instalación normal.
  3. Si esa versión ya estaba instalada con el exe oficial, el instalador no baja nada: entonces cierra Herdr, pone el
     herdr.exe del fork (verificando SHA-256) y deja el marcador agentnav-build.json que `agentnav doctor` reconoce.
-Para volver al oficial: `herdr update`.
+ 4. Deja el chequeo automático de updates: copia agentnav/update.ps1 a %USERPROFILE%\.herdr\agentnav y crea la tarea
+    programada "AgentNav Herdr update" (al iniciar sesión y una vez por día). Para no crearla: -NoAutoUpdate.
+    Además este herdr.exe consulta el manifiesto del fork, así que el aviso de update dentro de Herdr y `herdr update`
+    también se quedan con los temas.
+Para volver al oficial: Unregister-ScheduledTask "AgentNav Herdr update" y reinstalar con irm https://herdr.dev/install.ps1 | iex
+(`herdr update` desde este build trae el del fork, no el oficial).
 #>
 [CmdletBinding()]
 param(
     [string]$Repo = "pablitotester/herdr",
-    [string]$Tag = ""
+    [string]$Tag = "",
+    # No relanzar Herdr al final (lo usa update.ps1 desde la tarea programada).
+    [switch]$NoLaunch,
+    # No crear la tarea programada de updates automáticos.
+    [switch]$NoAutoUpdate
 )
 
 Set-StrictMode -Version Latest
@@ -86,14 +95,45 @@ try {
         Set-Content -LiteralPath (Join-Path $current "agentnav-build.json")
     $v = (& $exe --version | Out-String).Trim()
     Step "Listo: $v con temas AgentNav en $current"
+
+    # 4. Chequeo automático de updates
+    if (-not $NoAutoUpdate) {
+        try {
+            $stateDir = Join-Path $env:USERPROFILE ".herdr\agentnav"
+            New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+            $updater = Join-Path $stateDir "update.ps1"
+            Get-File "https://raw.githubusercontent.com/$Repo/agentnav/agentnav/update.ps1" $updater
+            $taskName = "AgentNav Herdr update"
+            $me = "$env:USERDOMAIN\$env:USERNAME"
+            $action = New-ScheduledTaskAction -Execute "powershell.exe" `
+                -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$updater`" -Repo $Repo"
+            $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $me
+            $atLogon.Delay = "PT2M"
+            $daily = New-ScheduledTaskTrigger -Daily -At "13:00"
+            $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+                -RunOnlyIfNetworkAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
+            $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($atLogon, $daily) -Settings $settings `
+                -Principal $principal -Force `
+                -Description "Chequea releases agentnav-v* de $Repo e instala el nuevo si Herdr está cerrado. Log: $stateDir\update.log" |
+                Out-Null
+            Step "Updates automáticos: tarea '$taskName' (al iniciar sesión y todos los días). Log: $stateDir\update.log"
+        } catch {
+            Write-Warning "no pude crear la tarea de updates automáticos: $($_.Exception.Message)"
+        }
+    }
+
     $agentnav = Get-Command agentnav -ErrorAction SilentlyContinue
-    if ($null -ne $agentnav) {
+    if ($NoLaunch) {
+        # update.ps1 desde la tarea programada: no abrir nada.
+    } elseif ($null -ne $agentnav) {
         Step "AgentNav está en esta PC: levanto Herdr de nuevo (agentnav app)"
         & agentnav app
     } else {
-        Write-Host "    Abrí una PowerShell nueva y corré: herdr   (en Settings, ctrl+b s → theme, están cs16, matrix y procomm)"
+        Write-Host "    Abrí una PowerShell nueva y corré: herdr   (en Settings, ctrl+b s → theme, están cs16, matrix, procomm, ambar y miami)"
     }
-    Write-Host "    Volver al oficial: herdr update"
+    Write-Host "    Volver al oficial: Unregister-ScheduledTask 'AgentNav Herdr update' y después irm https://herdr.dev/install.ps1 | iex"
+    Write-Host "    (herdr update desde este build trae el del fork, con los temas)"
 } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }

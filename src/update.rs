@@ -22,7 +22,10 @@ use std::time::{Duration, Instant};
 use interprocess::local_socket::traits::Stream as _;
 use serde::{Deserialize, Deserializer};
 
-const STABLE_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/latest.json";
+// agentnav: el chequeo de fondo y `herdr update` siguen los releases del fork (mismo formato que
+// herdr.dev/latest.json, con los temas), así actualizar no vuelve al exe oficial.
+const STABLE_UPDATE_MANIFEST_URL: &str =
+    "https://github.com/pablitotester/herdr/releases/latest/download/agentnav-latest.json";
 const PREVIEW_UPDATE_MANIFEST_URL: &str = "https://herdr.dev/preview.json";
 const HOMEBREW_FORMULA_API_URL: &str = "https://formulae.brew.sh/api/formula/herdr.json";
 const HERDR_UPDATE_COMMAND: &str = "herdr update";

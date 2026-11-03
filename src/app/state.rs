@@ -549,6 +549,8 @@ impl Palette {
             "cs16" => Some(Self::cs16()),
             "matrix" => Some(Self::matrix()),
             "procomm" => Some(Self::procomm()),
+            "ambar" => Some(Self::ambar()),
+            "miami" => Some(Self::miami()),
             _ => None,
         }
     }
