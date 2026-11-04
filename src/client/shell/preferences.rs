@@ -28,6 +28,9 @@ pub(super) struct ClientChromePreferences {
     pub(super) collapsed_groups: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(super) remote_collapsed_groups: Vec<ClientRemoteCollapsedGroups>,
+    /// AgentNav folder tree (absent in official Herdr preferences).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) folder_tree: Option<super::folder_tree::FolderTreePreferences>,
 }
 
 pub(super) fn path_for_local_endpoint(socket_path: &Path) -> PathBuf {

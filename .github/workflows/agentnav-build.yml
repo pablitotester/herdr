@@ -95,7 +95,7 @@ jobs:
             git add agentnav/BASE_TAG
             # Un solo commit por encima de upstream: el próximo rebase es trivial.
             git reset --soft "$latest"
-            git commit -q -m "agentnav: cinco temas extra (cs16, matrix, procomm, ambar, miami) + workflow de build, base $latest"
+            git commit -q -m "agentnav: cinco temas extra (cs16, matrix, procomm, ambar, miami) + árbol de carpetas + workflow de build, base $latest"
             git push --force-with-lease origin HEAD:agentnav
             # Zig puede cambiar con la versión: releer del release.yml nuevo.
             zig="$(grep -A2 'setup-zig' .github/workflows/release.yml | grep -oE 'version: *[0-9][0-9.]*' | head -1 | grep -oE '[0-9][0-9.]*' || true)"

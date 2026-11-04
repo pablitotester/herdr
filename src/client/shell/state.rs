@@ -138,6 +138,7 @@ pub(super) struct ShellHitMap {
     pub(super) release_notes_scrollbar: Rect,
     pub(super) release_notes_scroll_metrics: Option<crate::pane::ScrollMetrics>,
     pub(super) release_notes_max_scroll: usize,
+    pub(super) folder_tree: super::folder_tree::FolderTreeHits, // AgentNav
 }
 
 #[derive(Clone)]
@@ -884,6 +885,7 @@ pub(crate) struct ClientShellState {
     pub(super) remote_collapsed_groups: HashMap<ClientEndpointId, HashSet<String>>,
     pub(super) workspace_scroll: usize,
     pub(super) agent_scroll: usize,
+    pub(super) folder_tree: super::folder_tree::FolderTree, // AgentNav
     pub(super) pending_agent_reveal: Option<(ClientEndpointId, String)>,
     pub(super) tab_scroll: usize,
     pub(super) mobile_switcher_scroll: usize,
@@ -1058,6 +1060,7 @@ impl ClientShellState {
             remote_collapsed_groups,
             workspace_scroll: 0,
             agent_scroll: 0,
+            folder_tree: super::folder_tree::FolderTree::from_preferences(preferences.folder_tree),
             pending_agent_reveal: None,
             tab_scroll: 0,
             mobile_switcher_scroll: 0,

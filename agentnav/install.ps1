@@ -14,6 +14,8 @@ Qué hace:
     programada "AgentNav Herdr update" (al iniciar sesión y una vez por día). Para no crearla: -NoAutoUpdate.
     Además este herdr.exe consulta el manifiesto del fork, así que el aviso de update dentro de Herdr y `herdr update`
     también se quedan con los temas.
+ 5. Crea el comando `agentnav` (%USERPROFILE%\.herdr\agentnav\bin\agentnav.cmd, en el PATH del usuario), que abre
+    este Herdr igual que `herdr`. Si la PC ya tiene el programa AgentNav con su propio `agentnav`, no lo pisa.
 Para volver al oficial: Unregister-ScheduledTask "AgentNav Herdr update" y reinstalar con irm https://herdr.dev/install.ps1 | iex
 (`herdr update` desde este build trae el del fork, no el oficial).
 #>
@@ -123,16 +125,59 @@ try {
         }
     }
 
-    $agentnav = Get-Command agentnav -ErrorAction SilentlyContinue
+    # 5. Comando `agentnav` (abre este Herdr, igual que `herdr`). Si en la PC ya está el programa AgentNav, que tiene su
+    #    propio `agentnav` (app, doctor, herdr-sync), no lo pisamos.
+    $binDir = Join-Path $env:USERPROFILE ".herdr\agentnav\bin"
+    $shim = Join-Path $binDir "agentnav.cmd"
+    $other = Get-Command agentnav -All -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandType -ne "Application" -or $_.Source -ne $shim } | Select-Object -First 1
+    if ($null -ne $other) {
+        Write-Warning "ya hay otro comando agentnav ($($other.CommandType) $($other.Source)); no creo el de Herdr. Abrilo con: herdr"
+    } else {
+        try {
+            New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+            Set-Content -LiteralPath $shim -Encoding Ascii -Value @(
+                "@echo off",
+                "rem AgentNav: abre Herdr (lo crea agentnav/install.ps1)",
+                "@`"%USERPROFILE%\.herdr\packages\standalone\current\herdr.exe`" %*",
+                "@exit /b %errorlevel%"
+            )
+            # Nunca setx (trunca a 1024) ni [Environment]::SetEnvironmentVariable (expande los %VAR% y pasa el
+            # valor a REG_SZ): se lee y escribe el registro tal cual, conservando REG_EXPAND_SZ.
+            # Compara sin mayúsculas ni barra final para no duplicar.
+            $norm = { param($p) [Environment]::ExpandEnvironmentVariables($p).Trim().TrimEnd('\').ToLowerInvariant() }
+            $envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Environment", $true)
+            try {
+                $userPath = [string]$envKey.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                $parts = @($userPath -split ";" | Where-Object { $_.Trim() })
+                if (-not ($parts | Where-Object { (& $norm $_) -eq (& $norm $binDir) })) {
+                    $envKey.SetValue("Path", (($parts + $binDir) -join ";"), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+                    # Avisa a Explorer del cambio (WM_SETTINGCHANGE), como hace SetEnvironmentVariable.
+                    [Environment]::SetEnvironmentVariable("AGENTNAV_PATH_REFRESH", "1", "User")
+                    [Environment]::SetEnvironmentVariable("AGENTNAV_PATH_REFRESH", $null, "User")
+                }
+            } finally {
+                $envKey.Close()
+            }
+            if (-not (@($env:Path -split ";") | Where-Object { $_.Trim() -and (& $norm $_) -eq (& $norm $binDir) })) {
+                $env:Path = "$env:Path;$binDir"
+            }
+            Step "Comando agentnav: $shim (abre Herdr; en las PowerShell que ya estaban abiertas, abrí una nueva)"
+        } catch {
+            Write-Warning "no pude crear el comando agentnav: $($_.Exception.Message)"
+        }
+    }
+
     if ($NoLaunch) {
         # update.ps1 desde la tarea programada: no abrir nada.
-    } elseif ($null -ne $agentnav) {
+    } elseif ($null -ne $other) {
         Step "AgentNav está en esta PC: levanto Herdr de nuevo (agentnav app)"
-        & agentnav app
+        & $other app
     } else {
-        Write-Host "    Abrí una PowerShell nueva y corré: herdr   (en Settings, ctrl+b s → theme, están cs16, matrix, procomm, ambar y miami)"
+        Write-Host "    Abrí una PowerShell nueva y corré: agentnav   (o herdr; en Settings, ctrl+b s → theme, están cs16, matrix, procomm, ambar y miami)"
     }
     Write-Host "    Volver al oficial: Unregister-ScheduledTask 'AgentNav Herdr update' y después irm https://herdr.dev/install.ps1 | iex"
+    Write-Host "    (y para sacar el comando agentnav: borrar $binDir y su entrada del PATH del usuario)"
     Write-Host "    (herdr update desde este build trae el del fork, con los temas)"
 } finally {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue

@@ -19,11 +19,11 @@ mod creation;
 mod custom_commands;
 mod git_refresh;
 mod ids;
+mod palette_agentnav; // AgentNav: five extra built-in themes
 mod popup;
 mod runtime;
 mod session;
 pub mod state;
-mod palette_agentnav; // AgentNav: three extra built-in themes
 mod tab_bar_status;
 mod terminal_targets;
 mod terminal_titles;

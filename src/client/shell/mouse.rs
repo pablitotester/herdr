@@ -1782,6 +1782,8 @@ impl ClientShellState {
         }
 
         match mouse.kind {
+            MouseEventKind::Down(MouseButton::Right)
+                if self.handle_folder_tree_click(point, true, outcome) => {} // AgentNav
             MouseEventKind::Down(MouseButton::Right) => {
                 let pane_hit = self
                     .hits
@@ -1894,6 +1896,11 @@ impl ClientShellState {
                     crate::input::KeybindMatch::Action(crate::input::KeybindAction::NextTab),
                     outcome,
                 );
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                if self.scroll_folder_tree(point, mouse.kind == MouseEventKind::ScrollDown) =>
+            {
+                outcome.repaint = true; // AgentNav
             }
             MouseEventKind::ScrollUp if super::contains(self.hits.agent_body, point) => {
                 let next = self.agent_scroll.saturating_sub(1);
@@ -2021,6 +2028,9 @@ impl ClientShellState {
                         }
                     }
                     return;
+                }
+                if self.handle_folder_tree_click(point, false, outcome) {
+                    return; // AgentNav
                 }
                 if super::contains(self.hits.agent_sort_toggle, point) {
                     let sort = match self.config.agent_panel_sort {

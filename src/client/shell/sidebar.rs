@@ -430,14 +430,25 @@ pub(crate) fn render_sidebar(
         }
     }
 
-    super::render_agent_panel(
-        buffer,
-        detail_area,
-        snapshot,
-        config,
-        state.agent_scroll,
-        hits,
-    );
+    if state.folder_tree.active {
+        // AgentNav: folder tree instead of the flat agent list.
+        super::super::folder_tree::render_tree_panel(
+            buffer,
+            detail_area,
+            state.folder_tree,
+            config,
+            &mut hits.folder_tree,
+        );
+    } else {
+        super::render_agent_panel(
+            buffer,
+            detail_area,
+            snapshot,
+            config,
+            state.agent_scroll,
+            hits,
+        );
+    }
 
     hits.sidebar_toggle = Rect::new(
         area.right().saturating_sub(2),

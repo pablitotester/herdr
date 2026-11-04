@@ -66,6 +66,16 @@ pub(super) fn render_agent_panel(
     ) {
         return;
     }
+    if hits.agent_sort_toggle.width > 0 {
+        // AgentNav: list/tree switch next to the sort label.
+        super::folder_tree::render_list_toggle(
+            buffer,
+            Rect::new(area.x, area.y + 1, area.width, 1),
+            hits.agent_sort_toggle,
+            config,
+            &mut hits.folder_tree,
+        );
+    }
 
     let rows = agent_rows(snapshot, config, None);
     render_agent_list(
