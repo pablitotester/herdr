@@ -107,8 +107,8 @@ try {
             Get-File "https://raw.githubusercontent.com/$Repo/agentnav/agentnav/update.ps1" $updater
             $taskName = "AgentNav Herdr update"
             $me = "$env:USERDOMAIN\$env:USERNAME"
-            $action = New-ScheduledTaskAction -Execute "powershell.exe" `
-                -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$updater`" -Repo $Repo"
+            $action = New-ScheduledTaskAction -Execute "conhost.exe" `
+                -Argument "--headless powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$updater`" -Repo $Repo"
             $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $me
             $atLogon.Delay = "PT2M"
             $daily = New-ScheduledTaskTrigger -Daily -At "13:00"

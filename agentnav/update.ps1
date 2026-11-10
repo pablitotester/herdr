@@ -65,7 +65,10 @@ try {
         exit 0
     }
 
-    Log "update disponible: $($rel.tag_name) (instalado: $current)"
+    $relExe = $rel.assets | Where-Object { $_.name -eq "herdr.exe" } | Select-Object -First 1
+    $relDate = if ($relExe) { ([datetime]$relExe.updated_at).ToString("yyyy-MM-dd HH:mm") } else { "?" }
+    $haveDate = (Get-Item -LiteralPath $exe).LastWriteTime.ToString("yyyy-MM-dd HH:mm")
+    Log "update disponible: $($rel.tag_name), build del $relDate (instalado: $current, build del $haveDate; distinto SHA-256 = parche nuevo aunque el número sea igual)"
     if ($Check) { exit 10 }
 
     $running = @(Get-Process herdr -ErrorAction SilentlyContinue)
