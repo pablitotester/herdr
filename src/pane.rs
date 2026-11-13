@@ -27,6 +27,7 @@ use crate::render_signal::RenderSignal;
 mod agent_detection;
 mod background_agent;
 mod cursor;
+pub(crate) use cursor::configure_settle_windows as configure_cursor_settle_windows; // AgentNav
 mod input;
 mod kitty_keyboard;
 mod osc;

@@ -1054,6 +1054,12 @@ pub struct AdvancedConfig {
     /// Maximum scrollback buffer size in bytes retained per pane terminal. Default: 10000000.
     #[serde(alias = "scrollback_lines")]
     pub scrollback_limit_bytes: usize,
+    /// AgentNav. Windows only: how long a small cursor step (same row, up to 2 columns) is held before it is
+    /// shown, so ConPTY redraws do not flicker the cursor. 0 disables the hold. Default: 20.
+    pub cursor_settle_ms: u64,
+    /// AgentNav. Windows only: how long a cursor jump (another row, or more than 2 columns) is held, the shape
+    /// of a redraw parking the cursor. 0 disables the hold. Default: 100.
+    pub cursor_jump_hold_ms: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1326,6 +1332,8 @@ impl Default for AdvancedConfig {
     fn default() -> Self {
         Self {
             scrollback_limit_bytes: DEFAULT_SCROLLBACK_LIMIT_BYTES,
+            cursor_settle_ms: 20,
+            cursor_jump_hold_ms: 100,
         }
     }
 }

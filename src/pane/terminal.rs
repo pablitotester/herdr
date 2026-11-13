@@ -42,7 +42,10 @@ use super::{
 
 const DEFAULT_DETECTION_ROWS: usize = 24;
 const KITTY_GRAPHICS_REDRAW_SETTLE: Duration = Duration::from_millis(20);
-const CURSOR_POSITION_SETTLE_ENABLED: bool = cfg!(windows);
+// AgentNav: antes `cfg!(windows)` fijo; ahora también depende de [advanced] cursor_settle_ms / cursor_jump_hold_ms.
+fn cursor_position_settle_enabled() -> bool {
+    super::cursor::settle_enabled()
+}
 const MODE_MOUSE_X10: u16 = 9;
 const MODE_MOUSE_PRESS_RELEASE: u16 = 1000;
 const MODE_MOUSE_BUTTON_MOTION: u16 = 1002;
@@ -1447,7 +1450,7 @@ impl GhosttyPaneTerminal {
             core.synchronized_output_epoch = core.synchronized_output_epoch.wrapping_add(1);
         }
         // Intermediate synchronized-frame positions must not become settled cursors.
-        if CURSOR_POSITION_SETTLE_ENABLED && !synchronized_output {
+        if cursor_position_settle_enabled() && !synchronized_output {
             let cursor_started = crate::render_prof::timer();
             let cursor_after_write = current_cursor_state(&mut core);
             crate::render_prof::duration_since("pty.cursor_state_update", cursor_started);
@@ -1466,7 +1469,7 @@ impl GhosttyPaneTerminal {
             synchronized_output,
             has_kitty_graphics_sequence,
             core.cursor_settle_state.render_delay(),
-            CURSOR_POSITION_SETTLE_ENABLED,
+            cursor_position_settle_enabled(),
         );
         if request_render {
             crate::render_prof::event("pty.request_render");
@@ -2541,7 +2544,7 @@ fn effective_cursor_state(
     core: &mut GhosttyPaneCore,
     current: Option<TerminalCursorState>,
 ) -> Option<TerminalCursorState> {
-    if !CURSOR_POSITION_SETTLE_ENABLED {
+    if !cursor_position_settle_enabled() {
         return current;
     }
     core.cursor_settle_state

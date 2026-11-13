@@ -423,6 +423,11 @@ impl App {
         let session_writer = Arc::new(std::sync::Mutex::new(crate::persist::SessionWriter::new(
             policy.restore_session && snapshot.is_none(),
         )));
+        // AgentNav: retención del cursor configurable ([advanced] cursor_settle_ms / cursor_jump_hold_ms).
+        crate::pane::configure_cursor_settle_windows(
+            Duration::from_millis(config.advanced.cursor_settle_ms),
+            Duration::from_millis(config.advanced.cursor_jump_hold_ms),
+        );
         let (workspaces, active, selected) = if let Some(snap) = snapshot {
             let history = config
                 .experimental
@@ -713,6 +718,10 @@ impl App {
         ) {
             app.plugin_installation_cleanup_allowed = false;
         }
+        crate::pane::configure_cursor_settle_windows(
+            Duration::from_millis(config.advanced.cursor_settle_ms),
+            Duration::from_millis(config.advanced.cursor_jump_hold_ms),
+        ); // AgentNav
         let (workspaces, terminals, runtimes) = crate::persist::restore_handoff(
             snapshot,
             config.advanced.scrollback_limit_bytes,

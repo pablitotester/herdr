@@ -1,9 +1,35 @@
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use super::terminal::TerminalCursorState;
 
 pub(crate) const CURSOR_POSITION_SETTLE: Duration = Duration::from_millis(20);
 const CURSOR_POSITION_MAX_HOLD: Duration = Duration::from_millis(100);
+
+// AgentNav: ventanas de retención configurables ([advanced] cursor_settle_ms / cursor_jump_hold_ms).
+// Se fijan una vez al arrancar el servidor; sin configurar valen las constantes de arriba.
+static SETTLE_WINDOWS: OnceLock<(Duration, Duration)> = OnceLock::new();
+
+pub(crate) fn configure_settle_windows(settle: Duration, jump_hold: Duration) {
+    let _ = SETTLE_WINDOWS.set((settle, jump_hold));
+}
+
+pub(crate) fn settle_window() -> Duration {
+    SETTLE_WINDOWS
+        .get()
+        .map_or(CURSOR_POSITION_SETTLE, |windows| windows.0)
+}
+
+fn jump_hold_window() -> Duration {
+    SETTLE_WINDOWS
+        .get()
+        .map_or(CURSOR_POSITION_MAX_HOLD, |windows| windows.1)
+}
+
+/// La retención sólo existe en Windows (ConPTY estaciona el cursor entre trozos); 0/0 la apaga del todo.
+pub(crate) fn settle_enabled() -> bool {
+    cfg!(windows) && (settle_window() > Duration::ZERO || jump_hold_window() > Duration::ZERO)
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct DecscusrTracker {
@@ -176,7 +202,7 @@ impl CursorPositionSettleState {
         };
 
         let pending_since = self.pending_since.unwrap_or(now);
-        if now.duration_since(pending_since) >= CURSOR_POSITION_MAX_HOLD {
+        if now.duration_since(pending_since) >= jump_hold_window() {
             self.settle(Some(current));
         } else {
             if !same_cursor_position(candidate, current) {
@@ -202,7 +228,7 @@ impl CursorPositionSettleState {
         // otherwise, so it waits for the max window. An ordinary caret step only
         // waits the normal settle window; the max hold bounds either case.
         if now.duration_since(candidate_since) >= self.candidate_hold()
-            || now.duration_since(pending_since) >= CURSOR_POSITION_MAX_HOLD
+            || now.duration_since(pending_since) >= jump_hold_window()
         {
             return Some(TerminalCursorState {
                 visible: current.visible && candidate.visible,
@@ -235,9 +261,9 @@ impl CursorPositionSettleState {
 
     fn candidate_hold(&self) -> Duration {
         if self.candidate_jump || self.candidate.is_some_and(|candidate| !candidate.visible) {
-            CURSOR_POSITION_MAX_HOLD
+            jump_hold_window()
         } else {
-            CURSOR_POSITION_SETTLE
+            settle_window()
         }
     }
 

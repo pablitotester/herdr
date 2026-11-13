@@ -444,6 +444,12 @@ pane_history = false
 # Maximum scrollback buffer size in bytes retained per pane terminal.
 # Matches Ghostty's default scrollback-limit behavior.
 # scrollback_limit_bytes = 10000000
+# Windows only (AgentNav build). Herdr holds the pane cursor briefly before showing it so ConPTY
+# redraws do not flicker it: cursor_settle_ms for a small same-row step, cursor_jump_hold_ms for a
+# jump to another row or more than 2 columns (the shape of a redraw parking the cursor).
+# Lower values make the cursor follow fast typing sooner; 0 disables the hold. Read at server start.
+# cursor_settle_ms = 20
+# cursor_jump_hold_ms = 100
 "##;
 
 // Bundled at build time so the printed skill always matches this binary's release.
