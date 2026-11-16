@@ -21,9 +21,10 @@ on:
         description: "recompilar aunque el release ya exista"
         required: false
         default: "false"
-  # Cada 6 horas: un release nuevo de upstream llega a la PC el mismo día.
+  # Una vez por día (06:17 UTC): el job de sync es Linux y dura un minuto; sólo compila si hay tag nuevo de upstream.
+  # (Era cada 6 horas hasta que GitHub pausó Actions en el fork por consumo; la rutina diaria de Claude lo dispara a mano si hace falta.)
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 6 * * *"
   # Cambios del parche (temas, etc.) sin release nuevo de upstream: recompila y reemplaza el release actual.
   # Los push del propio workflow (rebase) usan GITHUB_TOKEN y no vuelven a disparar esto.
   push:
