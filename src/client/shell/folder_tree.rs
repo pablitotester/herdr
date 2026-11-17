@@ -34,6 +34,8 @@ const MAX_IN_FLIGHT: usize = 8;
 const MAX_DEPTH: usize = 48;
 /// Rows above the tree body: divider, title, root path.
 const HEADER_ROWS: u16 = 3;
+/// Columns an agent keeps for its configured rows, however deep it sits.
+const MIN_AGENT_WIDTH: u16 = 16;
 
 /// Persisted in the client chrome preferences. Every field is optional so an official Herdr
 /// binary that drops it, or an older file without it, simply starts with the defaults.
@@ -82,11 +84,12 @@ pub(super) enum RowKind {
         badge: String,
         status: Option<AgentStatus>,
     },
+    /// The same resolved sidebar rows as the flat list (`rows` / `rows_by_agent`), so every
+    /// configured token shows up here too. `place` is the agent's folder, drawn above those rows
+    /// when the agent is outside the root.
     Agent {
-        pane_id: String,
-        status: AgentStatus,
-        focused: bool,
-        state: &'static str,
+        row: super::agent_sidebar::AgentRow,
+        place: Option<String>,
     },
     Note,
 }
@@ -96,6 +99,23 @@ pub(super) struct Row {
     pub(super) depth: u16,
     pub(super) label: String,
     pub(super) kind: RowKind,
+}
+
+impl Row {
+    /// Lines on screen: an agent takes its configured rows (plus one for `place`); folders and
+    /// notes take one.
+    pub(super) fn height(&self) -> u16 {
+        match &self.kind {
+            RowKind::Agent { row, place } => {
+                (row.rows.len().max(1) + usize::from(place.is_some())).min(u16::MAX as usize) as u16
+            }
+            _ => 1,
+        }
+    }
+
+    fn is_agent(&self) -> bool {
+        matches!(self.kind, RowKind::Agent { .. })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -132,6 +152,8 @@ pub(super) struct FolderTree {
     rx: mpsc::Receiver<DirListing>,
     rows: Vec<Row>,
     seen_revision: Option<(String, u64)>,
+    /// Agent row config used by the last rebuild; a config reload does not bump the revision.
+    seen_agents_config: Option<crate::config::AgentsSidebarConfig>,
     dirty: bool,
     /// Root is home or a drive root: its first level hides dotfolders and links.
     hide_root_clutter: bool,
@@ -165,6 +187,7 @@ impl FolderTree {
             rx,
             rows: Vec::new(),
             seen_revision: None,
+            seen_agents_config: None,
             dirty: true,
             hide_root_clutter: false,
             scroll: 0,
@@ -326,8 +349,16 @@ impl FolderTree {
     }
 
     /// Rebuilds the cached rows and starts the directory reads they need.
-    pub(super) fn rebuild(&mut self, snapshot: Option<&ClientShellSnapshot>, now: Instant) {
+    pub(super) fn rebuild(
+        &mut self,
+        snapshot: Option<&ClientShellSnapshot>,
+        config: &ClientShellConfig,
+        now: Instant,
+    ) {
         self.dirty = false;
+        if self.seen_agents_config.as_ref() != Some(&config.agents) {
+            self.seen_agents_config = Some(config.agents.clone());
+        }
         let Some(snapshot) = snapshot else {
             self.rows.clear();
             return;
@@ -337,7 +368,7 @@ impl FolderTree {
             self.rows.clear();
             return;
         };
-        let (trie, outside) = agent_trie(&root, snapshot);
+        let (trie, outside) = agent_trie(&root, snapshot, config);
         let mut rows = Vec::new();
         let mut wanted = Vec::new();
         // Home and drive roots are full of dotfolders, junctions and `$Recycle.Bin`; their first
@@ -512,10 +543,11 @@ impl FolderTree {
 
 #[derive(Clone, Debug)]
 struct AgentLeaf {
-    pane_id: String,
+    /// Plain name, for sorting siblings.
     label: String,
     status: AgentStatus,
-    focused: bool,
+    row: super::agent_sidebar::AgentRow,
+    place: Option<String>,
 }
 
 impl AgentLeaf {
@@ -524,10 +556,8 @@ impl AgentLeaf {
             depth,
             label: self.label.clone(),
             kind: RowKind::Agent {
-                pane_id: self.pane_id.clone(),
-                status: self.status,
-                focused: self.focused,
-                state: super::status_text(self.status),
+                row: self.row.clone(),
+                place: self.place.clone(),
             },
         }
     }
@@ -563,22 +593,31 @@ impl TrieNode {
     }
 }
 
-fn agent_trie(root: &Path, snapshot: &ClientShellSnapshot) -> (TrieNode, Vec<AgentLeaf>) {
+fn agent_trie(
+    root: &Path,
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+) -> (TrieNode, Vec<AgentLeaf>) {
     let mut trie = TrieNode::default();
     let mut outside = Vec::new();
     for agent in &snapshot.agents {
+        let label = agent
+            .display_agent
+            .as_deref()
+            .or(agent.name.as_deref())
+            .or(agent.agent.as_deref())
+            .or(agent.title.as_deref())
+            .unwrap_or("agent")
+            .to_owned();
+        // Same rows as the flat list; a pane without its workspace in the snapshot (the list
+        // skips it) gets a one-line fallback so it is not lost from the tree.
+        let row = super::agent_sidebar::agent_row(snapshot, &agent.pane_id, config, None)
+            .unwrap_or_else(|| fallback_agent_row(agent, &label));
         let leaf = AgentLeaf {
-            pane_id: agent.pane_id.clone(),
-            label: agent
-                .display_agent
-                .as_deref()
-                .or(agent.name.as_deref())
-                .or(agent.agent.as_deref())
-                .or(agent.title.as_deref())
-                .unwrap_or("agent")
-                .to_owned(),
+            label,
             status: agent.agent_status,
-            focused: agent.focused,
+            row,
+            place: None,
         };
         let path = snapshot
             .panes
@@ -611,6 +650,7 @@ fn agent_trie(root: &Path, snapshot: &ClientShellSnapshot) -> (TrieNode, Vec<Age
             let mut leaf = leaf;
             if let Some(place) = place {
                 leaf.label = format!("{} · {place}", leaf.label);
+                leaf.place = Some(place);
             }
             outside.push(leaf);
             continue;
@@ -626,6 +666,29 @@ fn agent_trie(root: &Path, snapshot: &ClientShellSnapshot) -> (TrieNode, Vec<Age
         node.agents.push(leaf);
     }
     (trie, outside)
+}
+
+fn fallback_agent_row(
+    agent: &crate::protocol::ClientShellAgent,
+    label: &str,
+) -> super::agent_sidebar::AgentRow {
+    use crate::ui::{ResolvedToken, ResolvedTokenKind};
+    let token = |kind| ResolvedToken {
+        kind,
+        style: Default::default(),
+    };
+    super::agent_sidebar::AgentRow {
+        pane_id: agent.pane_id.clone(),
+        status: agent.agent_status,
+        focused: agent.focused,
+        rows: vec![vec![
+            token(ResolvedTokenKind::StateIcon),
+            token(ResolvedTokenKind::Agent(label.to_owned())),
+            token(ResolvedTokenKind::StateText(
+                super::status_text(agent.agent_status).to_owned(),
+            )),
+        ]],
+    }
 }
 
 fn pane_paths(snapshot: &ClientShellSnapshot) -> Vec<PathBuf> {
@@ -927,14 +990,50 @@ pub(super) fn render_tree_panel(
     );
     hits.body = body;
     let rows = tree.rows();
-    let visible = body.height as usize;
-    hits.max_scroll = rows.len().saturating_sub(visible);
+    let gap = config.agents.row_gap;
+    hits.max_scroll = max_scroll(rows, body.height, gap);
     let scroll = tree.scroll.min(hits.max_scroll);
-    for (offset, row) in rows.iter().skip(scroll).take(visible).enumerate() {
-        let y = body.y + offset as u16;
-        let rect = Rect::new(body.x, y, body.width, 1);
-        render_row(buffer, rect, row, config, hits);
+    let mut y = body.y;
+    for (index, row) in rows.iter().enumerate().skip(scroll) {
+        let height = row.height().min(body.height);
+        // Like the flat list, a row that does not fit whole is not drawn.
+        if height == 0 || y.saturating_add(height) > body.bottom() {
+            break;
+        }
+        render_row(
+            buffer,
+            Rect::new(body.x, y, body.width, height),
+            row,
+            config,
+            hits,
+        );
+        y = y
+            .saturating_add(height)
+            .saturating_add(gap_after(rows, index, gap));
     }
+}
+
+/// `row_gap` from the agent list, between two consecutive agents (folders stay compact).
+fn gap_after(rows: &[Row], index: usize, gap: u16) -> u16 {
+    let next_is_agent = rows.get(index + 1).is_some_and(Row::is_agent);
+    if next_is_agent && rows[index].is_agent() {
+        gap
+    } else {
+        0
+    }
+}
+
+/// First row index from which the rest of the tree fits in `height` lines. Scrolling is by
+/// row; a last row taller than the body still gets an index so it is reachable.
+fn max_scroll(rows: &[Row], height: u16, gap: u16) -> usize {
+    let mut used = 0u32;
+    for index in (0..rows.len()).rev() {
+        used += u32::from(rows[index].height()) + u32::from(gap_after(rows, index, gap));
+        if used > u32::from(height) {
+            return (index + 1).min(rows.len() - 1);
+        }
+    }
+    0
 }
 
 fn render_row(
@@ -1024,57 +1123,48 @@ fn render_row(
                     .push((plus, FolderTreeHit::NewWorkspace(path.clone())));
             }
         }
-        RowKind::Agent {
-            pane_id,
-            status,
-            focused,
-            state,
-        } => {
-            if *focused {
-                buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
-            }
-            let icon = super::status_icon(*status, config.status_indicators);
-            put_text(
-                buffer,
-                x,
-                rect.y,
-                right.saturating_sub(x).min(1),
-                icon,
-                Style::default().fg(super::status_color(*status, palette)),
-            );
-            let state_width = display_width(state);
-            let label_x = x.saturating_add(2);
-            let label_right = right.saturating_sub(state_width + 1);
-            put_text(
-                buffer,
-                label_x,
-                rect.y,
-                label_right.saturating_sub(label_x),
-                &row.label,
-                Style::default()
-                    .fg(if *focused {
-                        palette.text
-                    } else {
-                        palette.subtext0
-                    })
-                    .add_modifier(if *focused {
-                        Modifier::BOLD
-                    } else {
-                        Modifier::empty()
-                    }),
-            );
-            if label_right > label_x.saturating_add(4) {
+        RowKind::Agent { row: agent, place } => {
+            let mut top = rect.y;
+            if let Some(place) = place {
+                let dim = Style::default()
+                    .fg(palette.overlay0)
+                    .add_modifier(Modifier::DIM);
+                let place_x = x.saturating_add(2);
+                put_text(buffer, x, top, right.saturating_sub(x).min(1), "·", dim);
                 put_text(
                     buffer,
-                    label_right,
-                    rect.y,
-                    state_width,
-                    state,
-                    Style::default().fg(super::status_color(*status, palette)),
+                    place_x,
+                    top,
+                    right.saturating_sub(place_x),
+                    place,
+                    dim,
                 );
+                top = top.saturating_add(1);
             }
+            let lines = Rect::new(rect.x, top, rect.width, rect.bottom().saturating_sub(top));
+            if agent.focused {
+                // The indent too, so the highlight spans the whole sidebar like in the list.
+                buffer.set_style(lines, Style::default().bg(palette.active_row_bg));
+            }
+            // Depth indent, capped so deep agents keep MIN_AGENT_WIDTH columns for their rows.
+            let shift = row
+                .depth
+                .saturating_mul(2)
+                .min(rect.width.saturating_sub(MIN_AGENT_WIDTH));
+            super::agent_sidebar::render_agent_row(
+                buffer,
+                Rect::new(
+                    rect.x.saturating_add(shift),
+                    lines.y,
+                    rect.width.saturating_sub(shift),
+                    lines.height,
+                ),
+                agent,
+                config,
+            );
+            // One hit for every line; render_agent_row registers none of its own.
             hits.rows
-                .push((rect, FolderTreeHit::Agent(pane_id.clone())));
+                .push((rect, FolderTreeHit::Agent(agent.pane_id.clone())));
         }
         RowKind::Note => {
             put_text(
@@ -1132,6 +1222,10 @@ impl ClientShellState {
             (Some(_), None) => true,
             (None, seen) => seen.is_some(),
         };
+        if self.folder_tree.seen_agents_config.as_ref() != Some(&self.config.agents) {
+            // Config reload (rows / rows_by_agent / row_gap); rebuild clones it once.
+            changed = true;
+        }
         if revision_changed {
             self.folder_tree.seen_revision = self
                 .snapshot
@@ -1143,13 +1237,14 @@ impl ClientShellState {
             return false;
         }
         let previous = std::mem::take(&mut self.folder_tree.rows);
-        self.folder_tree.rebuild(self.snapshot.as_deref(), now);
+        self.folder_tree
+            .rebuild(self.snapshot.as_deref(), &self.config, now);
         previous != self.folder_tree.rows
     }
 
     fn refresh_folder_tree(&mut self, outcome: &mut ClientShellInput) {
         self.folder_tree
-            .rebuild(self.snapshot.as_deref(), Instant::now());
+            .rebuild(self.snapshot.as_deref(), &self.config, Instant::now());
         self.persist_chrome_preferences(outcome);
         outcome.repaint = true;
     }
@@ -1397,7 +1492,7 @@ mod tests {
             ("p2", "/nonexistent-agentnav-root/repo", "codex"),
             ("p3", "/elsewhere", "gemini"),
         ]);
-        tree.rebuild(Some(&snapshot), Instant::now());
+        tree.rebuild(Some(&snapshot), &test_config(), Instant::now());
         let labels = tree
             .rows()
             .iter()
@@ -1428,7 +1523,7 @@ mod tests {
         let wait_for = |tree: &mut FolderTree, label: &str| {
             for _ in 0..200 {
                 tree.drain();
-                tree.rebuild(Some(&snapshot), Instant::now());
+                tree.rebuild(Some(&snapshot), &test_config(), Instant::now());
                 if tree.rows().iter().any(|row| row.label == label) {
                     return;
                 }
@@ -1442,10 +1537,10 @@ mod tests {
 
         std::fs::create_dir_all(base.join("repo/new")).unwrap();
         tree.toggle(&base.join("repo"));
-        tree.rebuild(Some(&snapshot), Instant::now());
+        tree.rebuild(Some(&snapshot), &test_config(), Instant::now());
         assert!(!tree.rows().iter().any(|row| row.label == "old/"));
         tree.toggle(&base.join("repo"));
-        tree.rebuild(Some(&snapshot), Instant::now());
+        tree.rebuild(Some(&snapshot), &test_config(), Instant::now());
         // While the refresh runs, the previous listing stays visible.
         assert!(tree.rows().iter().any(|row| row.label == "old/"));
         wait_for(&mut tree, "new/");
@@ -1507,7 +1602,7 @@ mod tests {
         );
         let cwd = root.join(".agentwork").to_string_lossy().into_owned();
         let snapshot = test_snapshot(&[("p1", &cwd, "claude")]);
-        tree.rebuild(Some(&snapshot), Instant::now());
+        tree.rebuild(Some(&snapshot), &test_config(), Instant::now());
         let labels = tree
             .rows()
             .iter()
@@ -1525,9 +1620,9 @@ mod tests {
             ..Default::default()
         }));
         let snapshot = test_snapshot(&[("p1", "/nonexistent-agentnav-root/repo", "claude")]);
-        tree.rebuild(Some(&snapshot), Instant::now());
+        tree.rebuild(Some(&snapshot), &test_config(), Instant::now());
         tree.toggle(&p("/nonexistent-agentnav-root/repo"));
-        tree.rebuild(Some(&snapshot), Instant::now());
+        tree.rebuild(Some(&snapshot), &test_config(), Instant::now());
         let repo = tree.rows().iter().find(|row| row.label == "repo/").unwrap();
         assert!(matches!(
             &repo.kind,
@@ -1592,5 +1687,173 @@ mod tests {
             });
         }
         snapshot
+    }
+
+    fn test_config() -> ClientShellConfig {
+        ClientShellConfig::from_config(&crate::config::Config::default())
+    }
+
+    /// The user's config: workspace + tab on the first line, the stripped title below.
+    fn two_line_config() -> ClientShellConfig {
+        let mut config = test_config();
+        config.agents = toml::from_str(
+            r#"
+            [rows_by_agent]
+            claude = [["state_icon", "workspace", "tab"], ["terminal_title_stripped"]]
+            "#,
+        )
+        .unwrap();
+        config
+    }
+
+    /// One claude agent in /nonexistent-agentnav-root/repo, in workspace "web", tab "main".
+    fn titled_snapshot() -> ClientShellSnapshot {
+        let mut snapshot = test_snapshot(&[("p1", "/nonexistent-agentnav-root/repo", "claude")]);
+        snapshot
+            .workspaces
+            .push(crate::protocol::ClientShellWorkspace {
+                workspace_id: "w".to_owned(),
+                active_tab_id: "t".to_owned(),
+                new_workspace_cwd: "/nonexistent-agentnav-root/repo".to_owned(),
+                number: 1,
+                label: "web".to_owned(),
+                custom_label: true,
+                branch: None,
+                git_ahead_behind: None,
+                tokens: vec![],
+                worktree: None,
+                focused: true,
+                agent_status: AgentStatus::Idle,
+            });
+        snapshot.tabs.push(crate::protocol::ClientShellTab {
+            tab_id: "t".to_owned(),
+            workspace_id: "w".to_owned(),
+            number: 1,
+            label: "main".to_owned(),
+            custom_label: true,
+            zoomed: false,
+            focused: true,
+            agent_status: AgentStatus::Idle,
+        });
+        let agent = &mut snapshot.agents[0];
+        agent.agent = Some("claude".to_owned());
+        agent.terminal_title_stripped = Some("fixing the tree".to_owned());
+        snapshot
+    }
+
+    fn rooted_tree() -> FolderTree {
+        FolderTree::from_preferences(Some(FolderTreePreferences {
+            active: true,
+            root: Some("/nonexistent-agentnav-root".to_owned()),
+            ..Default::default()
+        }))
+    }
+
+    #[test]
+    fn agent_rows_follow_rows_by_agent_like_the_list() {
+        use crate::ui::ResolvedTokenKind;
+        let config = two_line_config();
+        let snapshot = titled_snapshot();
+        let mut tree = rooted_tree();
+        tree.rebuild(Some(&snapshot), &config, Instant::now());
+        let agent = tree
+            .rows()
+            .iter()
+            .find(|row| row.is_agent())
+            .expect("agent row");
+        assert_eq!(agent.height(), 2);
+        let RowKind::Agent { row, place } = &agent.kind else {
+            unreachable!()
+        };
+        assert_eq!(place, &None);
+        // Exactly what the flat list resolves for the same pane.
+        let list = super::super::agent_sidebar::agent_row(&snapshot, "p1", &config, None).unwrap();
+        assert_eq!(row, &list);
+        let kinds = |line: usize| {
+            row.rows[line]
+                .iter()
+                .map(|token| token.kind.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            kinds(0),
+            [
+                ResolvedTokenKind::StateIcon,
+                ResolvedTokenKind::Workspace("web".to_owned()),
+                ResolvedTokenKind::Tab("main".to_owned()),
+            ]
+        );
+        assert_eq!(
+            kinds(1),
+            [ResolvedTokenKind::TerminalTitle(
+                "fixing the tree".to_owned()
+            )]
+        );
+
+        // A config reload (no new revision) is picked up on the next tick.
+        assert_ne!(
+            tree.seen_agents_config.as_ref(),
+            Some(&test_config().agents)
+        );
+    }
+
+    #[test]
+    fn two_line_agents_render_whole_with_one_hit_and_scroll_by_lines() {
+        let mut config = two_line_config();
+        config.mouse_capture = true;
+        let snapshot = titled_snapshot();
+        let mut tree = rooted_tree();
+        tree.rebuild(Some(&snapshot), &config, Instant::now());
+        // repo/ (folder) + agent (2 lines) + "loading…" notes.
+        let area = Rect::new(0, 0, 30, 12);
+        let mut buffer = Buffer::empty(area);
+        let mut hits = FolderTreeHits::default();
+        render_tree_panel(&mut buffer, area, &tree, &config, &mut hits);
+        let agent_hit = hits
+            .rows
+            .iter()
+            .find(|(_, hit)| matches!(hit, FolderTreeHit::Agent(id) if id == "p1"))
+            .map(|(rect, _)| *rect)
+            .expect("agent hit");
+        assert_eq!(agent_hit.height, 2);
+        let line = |y: u16| {
+            (0..area.width)
+                .map(|x| buffer[(x, y)].symbol().to_owned())
+                .collect::<String>()
+        };
+        assert!(line(agent_hit.y).contains("web"), "{:?}", line(agent_hit.y));
+        assert!(line(agent_hit.y).contains("main"));
+        assert!(line(agent_hit.y + 1).contains("fixing the tree"));
+        // The state icon is drawn once, by the configured token.
+        let icon = super::super::status_icon(AgentStatus::Idle, config.status_indicators);
+        assert_eq!(line(agent_hit.y).matches(icon).count(), 1);
+
+        // max_scroll counts lines: three rows of 1 + 2 + 1 lines need four.
+        let rows = tree.rows();
+        let total: u16 = rows.iter().map(Row::height).sum();
+        assert_eq!(max_scroll(rows, total, 0), 0);
+        assert!(max_scroll(rows, total - 1, 0) > 0);
+    }
+
+    #[test]
+    fn deep_agents_keep_a_minimum_width() {
+        let config = two_line_config();
+        let mut row = rooted_tree();
+        row.rebuild(Some(&titled_snapshot()), &config, Instant::now());
+        let mut agent = row
+            .rows()
+            .iter()
+            .find(|row| row.is_agent())
+            .cloned()
+            .unwrap();
+        agent.depth = 40;
+        let area = Rect::new(0, 0, 20, 2);
+        let mut buffer = Buffer::empty(area);
+        let mut hits = FolderTreeHits::default();
+        render_row(&mut buffer, area, &agent, &config, &mut hits);
+        let first = (0..area.width)
+            .map(|x| buffer[(x, 0)].symbol().to_owned())
+            .collect::<String>();
+        assert!(first.contains("web") && first.contains("main"), "{first:?}");
     }
 }

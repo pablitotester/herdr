@@ -10,6 +10,7 @@ use ratatui::{
 
 use super::*;
 
+#[derive(Clone, Debug, PartialEq, Eq)] // AgentNav: the folder tree caches these rows
 pub(super) struct AgentRow {
     pub(super) pane_id: String,
     pub(super) status: crate::api::schema::AgentStatus,
